@@ -1,6 +1,6 @@
 # droid-agent
 
-**Live demo:** https://droid-agent.vercel.app (scripted replies, nothing runs)
+**Live demo:** https://droid-agent.vercel.app (scripted replies, nothing runs) · deploys automatically on every push to `main`
 
 An autonomous AI terminal agent for Android. It runs inside **Termux** and turns a spare or old phone
 into a coding assistant. You describe a task; Gemini writes code, proposes shell commands, reads the
