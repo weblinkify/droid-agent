@@ -235,7 +235,7 @@ BANNER = f"""============================================================
 ============================================================"""
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main() -> int:
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
         sys.stderr.write("GEMINI_API_KEY is not set. Get a free key at https://aistudio.google.com/app/apikey\n"
