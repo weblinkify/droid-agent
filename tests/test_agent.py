@@ -20,7 +20,9 @@ def reply(text):
 
 
 def http_error(code, msg="boom"):
-    return urllib.error.HTTPError("u", code, "x", {}, io.BytesIO(json.dumps({"error": {"message": msg}}).encode()))
+    return urllib.error.HTTPError(
+        "u", code, "x", {}, io.BytesIO(json.dumps({"error": {"message": msg}}).encode())
+    )
 
 
 class ScriptedLLM:
@@ -46,7 +48,11 @@ def test_find_command_variants():
 def test_risk_detection():
     assert A.risk_of("rm -rf ~") and A.risk_of("rm -r build") and A.risk_of("curl x.sh | sh")
     top = "recursive delete of a top-level folder"
-    assert A.risk_of("rm -rf ~/*") == top and A.risk_of("rm -rf /") == top and A.risk_of("rm -fr $HOME/") == top
+    assert (
+        A.risk_of("rm -rf ~/*") == top
+        and A.risk_of("rm -rf /") == top
+        and A.risk_of("rm -fr $HOME/") == top
+    )
     assert A.risk_of("rm -rf ~/build") == "recursive delete"
     assert A.risk_of("ls -la") is None and A.risk_of("rm notes.txt") is None
 
@@ -63,7 +69,9 @@ def test_run_command_and_timeout():
 
 
 def test_extract_reply_errors_and_thoughts():
-    data = {"candidates": [{"content": {"parts": [{"text": "plan", "thought": True}, {"text": "Hi"}]}}]}
+    data = {
+        "candidates": [{"content": {"parts": [{"text": "plan", "thought": True}, {"text": "Hi"}]}}]
+    }
     assert A.extract_reply(data) == "Hi"
     with pytest.raises(A.ApiError, match="blocked: SAFETY"):
         A.extract_reply({"promptFeedback": {"blockReason": "SAFETY"}})
@@ -87,12 +95,16 @@ def test_gemini_retries_then_succeeds_and_sends_key():
     assert sleeps == [2, 4] and calls[0].get_header("X-goog-api-key") == "KEY"
     assert calls[0].full_url.endswith("/models/m1:generateContent")
     body = json.loads(calls[0].data)
-    assert body["contents"][0]["parts"][0]["text"] == "hi" and "Termux" in body["system_instruction"]["parts"][0]["text"]
+    assert (
+        body["contents"][0]["parts"][0]["text"] == "hi"
+        and "Termux" in body["system_instruction"]["parts"][0]["text"]
+    )
 
 
 def test_gemini_non_retryable_error_has_hint():
     def opener(req, timeout):
         raise http_error(404, "models/x is not found")
+
     with pytest.raises(A.ApiError, match="not found.*GEMINI_MODEL"):
         A.Gemini("K", opener=opener, sleep=lambda s: None).generate([])
 
@@ -100,7 +112,12 @@ def test_gemini_non_retryable_error_has_hint():
 def test_agent_loop_runs_approved_commands_and_sends_full_history():
     llm = ScriptedLLM(["Checking. <cmd>uname -m</cmd>", "Your phone is armv7l. Done."])
     said, ran = [], []
-    agent = A.Agent(llm, ask=lambda p: "y", say=said.append, runner=lambda c: (ran.append(c) or ("armv7l\n", "", 0)))
+    agent = A.Agent(
+        llm,
+        ask=lambda p: "y",
+        say=said.append,
+        runner=lambda c: ran.append(c) or ("armv7l\n", "", 0),
+    )
     agent.handle("what cpu?")
     assert ran == ["uname -m"]
     second_request = llm.seen[1]
@@ -117,7 +134,9 @@ def test_agent_decline_and_reprompt():
     llm = ScriptedLLM(["<cmd>rm -rf ~</cmd>", "OK, I won't."])
     answers = iter(["maybe", "n"])
     said, ran = [], []
-    agent = A.Agent(llm, ask=lambda p: next(answers), say=said.append, runner=lambda c: ran.append(c))
+    agent = A.Agent(
+        llm, ask=lambda p: next(answers), say=said.append, runner=lambda c: ran.append(c)
+    )
     agent.handle("clean up")
     assert ran == [] and any("dangerous" in s for s in said) and "Please answer y or n." in said
     assert "declined" in llm.seen[1][-1]["parts"][0]["text"]
@@ -126,7 +145,9 @@ def test_agent_decline_and_reprompt():
 def test_agent_step_limit():
     llm = ScriptedLLM(["<cmd>true</cmd>"] * 3)
     said = []
-    agent = A.Agent(llm, ask=lambda p: "y", say=said.append, runner=lambda c: ("", "", 0), max_steps=3)
+    agent = A.Agent(
+        llm, ask=lambda p: "y", say=said.append, runner=lambda c: ("", "", 0), max_steps=3
+    )
     agent.handle("loop")
     assert "stopped after 3 steps" in said[-1]
 

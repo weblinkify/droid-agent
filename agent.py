@@ -19,7 +19,8 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 __version__ = "1.0.0"
 
@@ -42,7 +43,10 @@ CMD_RE = re.compile(r"<cmd>(.*?)</cmd>", re.DOTALL | re.IGNORECASE)
 
 # Patterns that deserve a louder warning before the y/n prompt.
 RISKY_PATTERNS = [
-    (r"\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+((/|~|\$HOME)/?\*?|\*)(\s|$)", "recursive delete of a top-level folder"),
+    (
+        r"\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+((/|~|\$HOME)/?\*?|\*)(\s|$)",
+        "recursive delete of a top-level folder",
+    ),
     (r"\brm\s+-[a-zA-Z]*r", "recursive delete"),
     (r"\bmkfs|\bdd\s+if=", "disk write"),
     (r"\b(curl|wget)\b[^|]*\|\s*(ba|z)?sh\b", "pipes a download into a shell"),
@@ -56,7 +60,7 @@ class ApiError(RuntimeError):
     pass
 
 
-def find_command(text: str) -> Optional[str]:
+def find_command(text: str) -> str | None:
     m = CMD_RE.search(text)
     if not m:
         return None
@@ -66,7 +70,7 @@ def find_command(text: str) -> Optional[str]:
     return command or None
 
 
-def risk_of(command: str) -> Optional[str]:
+def risk_of(command: str) -> str | None:
     for pattern, reason in RISKY_PATTERNS:
         if re.search(pattern, command):
             return reason
@@ -83,47 +87,69 @@ def truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
 
 def run_command(command: str, timeout: int = COMMAND_TIMEOUT) -> tuple[str, str, int]:
     try:
-        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=timeout,
-                                errors="replace")
+        result = subprocess.run(
+            command, shell=True, capture_output=True, text=True, timeout=timeout, errors="replace"
+        )
         return result.stdout or "", result.stderr or "", result.returncode
     except subprocess.TimeoutExpired as exc:
-        out = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        out = (
+            exc.stdout.decode(errors="replace")
+            if isinstance(exc.stdout, bytes)
+            else (exc.stdout or "")
+        )
         return out, f"Command timed out after {timeout}s and was stopped.", 124
 
 
 def feedback_message(command: str, stdout: str, stderr: str, code: int) -> str:
-    return (f"Command: {command}\nExit code: {code}\n"
-            f"--- stdout ---\n{truncate(stdout) or '(empty)'}\n--- stderr ---\n{truncate(stderr) or '(empty)'}")
+    return (
+        f"Command: {command}\nExit code: {code}\n"
+        f"--- stdout ---\n{truncate(stdout) or '(empty)'}\n--- stderr ---\n{truncate(stderr) or '(empty)'}"
+    )
 
 
-def extract_reply(data: dict) -> str:
+def extract_reply(data: dict[str, Any]) -> str:
     try:
         candidate = data["candidates"][0]
     except (KeyError, IndexError, TypeError):
         feedback = data.get("promptFeedback", {}) if isinstance(data, dict) else {}
         reason = feedback.get("blockReason")
-        raise ApiError(f"No answer from the model{f' (blocked: {reason})' if reason else ''}.")
+        raise ApiError(
+            f"No answer from the model{f' (blocked: {reason})' if reason else ''}."
+        ) from None
     parts = (candidate.get("content") or {}).get("parts") or []
     text = "".join(p.get("text", "") for p in parts if not p.get("thought"))
     if not text.strip():
-        raise ApiError(f"Empty answer from the model (finish reason: {candidate.get('finishReason', 'unknown')}).")
+        raise ApiError(
+            f"Empty answer from the model (finish reason: {candidate.get('finishReason', 'unknown')})."
+        )
     return text
 
 
 class Gemini:
-    def __init__(self, api_key: str, model: str = DEFAULT_MODEL,
-                 opener: Callable = urllib.request.urlopen, sleep: Callable[[float], None] = time.sleep):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = DEFAULT_MODEL,
+        opener: Callable[..., Any] = urllib.request.urlopen,
+        sleep: Callable[[float], None] = time.sleep,
+    ):
         self.api_key = api_key
         self.model = model
         self._open = opener
         self._sleep = sleep
 
-    def generate(self, history: list[dict], retries: int = 3) -> str:
-        payload = {"contents": history, "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-                   "generationConfig": {"temperature": 0.2}}
+    def generate(self, history: list[dict[str, Any]], retries: int = 3) -> str:
+        payload = {
+            "contents": history,
+            "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+            "generationConfig": {"temperature": 0.2},
+        }
         req = urllib.request.Request(
-            f"{API_ROOT}/{self.model}:generateContent", data=json.dumps(payload).encode("utf-8"), method="POST",
-            headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key})
+            f"{API_ROOT}/{self.model}:generateContent",
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
+        )
         for attempt in range(retries + 1):
             try:
                 with self._open(req, timeout=REQUEST_TIMEOUT) as resp:
@@ -131,12 +157,12 @@ class Gemini:
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode("utf-8", errors="replace")
                 if exc.code in (429, 500, 502, 503, 504) and attempt < retries:
-                    self._sleep(2 ** attempt * 2)
+                    self._sleep(2**attempt * 2)
                     continue
                 raise ApiError(_http_hint(exc.code, body)) from None
             except (urllib.error.URLError, TimeoutError) as exc:
                 if attempt < retries:
-                    self._sleep(2 ** attempt * 2)
+                    self._sleep(2**attempt * 2)
                     continue
                 reason = getattr(exc, "reason", exc)
                 raise ApiError(f"Network error: {reason}. Check your connection.") from None
@@ -159,7 +185,9 @@ def _http_hint(code: int, body: str) -> str:
     return f"HTTP {code}: {message} {hints.get(code, '')}".strip()
 
 
-def trim_history(history: list[dict], max_turns: int = MAX_HISTORY_TURNS) -> list[dict]:
+def trim_history(
+    history: list[dict[str, Any]], max_turns: int = MAX_HISTORY_TURNS
+) -> list[dict[str, Any]]:
     """Keeps the newest turns, starting on a user turn as the API requires."""
     if len(history) <= max_turns:
         return history
@@ -170,14 +198,20 @@ def trim_history(history: list[dict], max_turns: int = MAX_HISTORY_TURNS) -> lis
 
 
 class Agent:
-    def __init__(self, llm: Gemini, ask: Callable[[str], str] = input, say: Callable[[str], None] = print,
-                 runner: Callable[[str], tuple[str, str, int]] = run_command, max_steps: int = MAX_STEPS):
+    def __init__(
+        self,
+        llm: Gemini,
+        ask: Callable[[str], str] = input,
+        say: Callable[[str], None] = print,
+        runner: Callable[[str], tuple[str, str, int]] = run_command,
+        max_steps: int = MAX_STEPS,
+    ):
         self.llm = llm
         self.ask = ask
         self.say = say
         self.run = runner
         self.max_steps = max_steps
-        self.history: list[dict] = []
+        self.history: list[dict[str, Any]] = []
 
     def _add(self, role: str, text: str) -> None:
         self.history.append({"role": role, "parts": [{"text": text}]})
@@ -212,13 +246,18 @@ class Agent:
         for _ in range(self.max_steps):
             reply = self.llm.generate(self.history)
             self._add("model", reply)
-            visible = CMD_RE.sub(lambda m: f"[command: {find_command(m.group(0)) or ''}]", reply).strip()
+            visible = CMD_RE.sub(
+                lambda m: f"[command: {find_command(m.group(0)) or ''}]", reply
+            ).strip()
             self.say(f"Agent: {visible}")
             command = find_command(reply)
             if not command:
                 return
             if not self.confirm(command):
-                self._add("user", "I declined that command. Suggest another approach or ask me what to do.")
+                self._add(
+                    "user",
+                    "I declined that command. Suggest another approach or ask me what to do.",
+                )
                 self.say("[declined]")
                 continue
             stdout, stderr, code = self.run(command)
@@ -238,8 +277,10 @@ BANNER = f"""============================================================
 def main() -> int:
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
-        sys.stderr.write("GEMINI_API_KEY is not set. Get a free key at https://aistudio.google.com/app/apikey\n"
-                         "then run: export GEMINI_API_KEY=\"your_key\"\n")
+        sys.stderr.write(
+            "GEMINI_API_KEY is not set. Get a free key at https://aistudio.google.com/app/apikey\n"
+            'then run: export GEMINI_API_KEY="your_key"\n'
+        )
         return 1
     model = os.environ.get("GEMINI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
     agent = Agent(Gemini(api_key, model))
