@@ -103,8 +103,9 @@ cd frontend && npm install && npm run dev
 ## Development
 
 ```bash
-pip install pytest
-pytest -q            # the Gemini API, user input and shell runner are all faked in tests
+make install   # dependencies and git hooks
+make check     # lint, types, tests and build: everything CI runs before merge
+make audit     # pip-audit and npm audit
 ```
 
 ## Project structure
