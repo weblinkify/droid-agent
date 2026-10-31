@@ -12,8 +12,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
       - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy agent.py
       - run: pytest -q
 
   web:
@@ -25,9 +28,30 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Secret scan (gitleaks, full history)
+        # Container instead of gitleaks-action: the action needs a paid licence for orgs.
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.0 detect --source=/repo --redact -v
+      - uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+      - name: Python dependency audit (pip-audit)
+        run: pipx run pip-audit -r requirements-dev.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: npm dependency audit
+        run: cd frontend && npm audit --audit-level=high
